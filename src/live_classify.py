@@ -65,6 +65,14 @@ COOLDOWN_SECONDS = 0.3
 # Number of MFCCs — must match train_classifier.py.
 N_MFCC = 13
 
+# Which input device to record from.
+# Set to None to use the system default microphone.
+# Set to a string (e.g. "AudioBox USB 96") to target a specific interface —
+# sounddevice does a substring match, so partial names work too ("AudioBox").
+# To list available devices, run:
+#   python -c "import sounddevice as sd; print(sd.query_devices())"
+INPUT_DEVICE = "AudioBox USB 96"
+
 # Human-readable output labels, indexed by the model's integer predictions.
 LABEL_NAMES = {0: "KICK", 1: "SNARE", 2: "HI-HAT"}
 
@@ -178,6 +186,12 @@ def run_live_classifier(model):
     #
     # macOS permission note: if the mic records only silence, go to
     # System Preferences → Privacy & Security → Microphone and enable Terminal.
+    # Show which mic we're actually using so it's obvious if it's wrong.
+    if INPUT_DEVICE is None:
+        print(f"Input device: system default")
+    else:
+        print(f"Input device: {INPUT_DEVICE}")
+
     try:
         with sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -185,6 +199,7 @@ def run_live_classifier(model):
             dtype="float32",
             blocksize=BLOCK_SIZE,
             callback=audio_callback,
+            device=INPUT_DEVICE,  # None = system default; string = match by name
         ):
             while True:
                 # Sleep for one block duration so we don't spin the CPU.

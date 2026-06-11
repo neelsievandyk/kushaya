@@ -62,32 +62,49 @@ LABEL_NAMES = {0: "kick", 1: "snare", 2: "hihat"}
 
 def extract_features(file_path):
     """
-    Load a .wav file and return a 1-D array of 13 MFCC mean values.
+    Load a .wav file and return a 1-D feature vector of length 15:
+      - 13 MFCC means              (overall spectral shape)
+      -  1 zero-crossing rate mean (noise-like vs tonal — separates hihat from snare)
+      -  1 spectral centroid mean  ("brightness" in Hz — hihats are brighter)
 
-    MFCCs (Mel-Frequency Cepstral Coefficients) describe the overall shape
-    of the sound spectrum. By averaging across time (axis=1), we collapse
-    an entire audio clip into one fixed-size feature vector — handy for
-    feeding into a machine learning model.
+    Why these three together:
+      MFCCs alone tend to confuse snare and hihat because averaging across
+      time hides their different *characters*. ZCR and centroid expose that
+      character directly: a hihat is noisy and bright; a snare is less so.
 
     Returns None if the file can't be read, so the caller can skip it.
     """
     try:
         # Load audio, resampling to a consistent 22050 Hz.
-        # librosa returns audio as a float32 numpy array and the actual sample rate.
         audio, sr = librosa.load(file_path, sr=SAMPLE_RATE)
-
-        # Compute MFCCs. Shape is (N_MFCC, time_frames) — one column per time frame.
-        mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=N_MFCC)
-
-        # Average each MFCC across time → shape (N_MFCC,) = (13,).
-        # This gives us one number per MFCC — a compact summary of the clip.
-        mfcc_mean = np.mean(mfccs, axis=1)
-
-        return mfcc_mean
+        return compute_feature_vector(audio, sr)
 
     except Exception as e:
         print(f"  Warning: could not read '{file_path}': {e}")
         return None
+
+
+def compute_feature_vector(audio, sr):
+    """
+    Build the 15-element feature vector from in-memory audio.
+    Shared by training (loaded from file) and live (captured from mic).
+    """
+    # 13 MFCC means — overall spectral shape.
+    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=N_MFCC)
+    mfcc_mean = np.mean(mfccs, axis=1)
+
+    # Zero-crossing rate (per frame) → take the mean.
+    # High for noisy sounds (hihat), lower for tonal sounds (snare body).
+    zcr = librosa.feature.zero_crossing_rate(y=audio)
+    zcr_mean = float(np.mean(zcr))
+
+    # Spectral centroid (per frame) → take the mean. Units: Hz.
+    # Roughly the "center of mass" of the spectrum. Hihats sit much higher.
+    centroid = librosa.feature.spectral_centroid(y=audio, sr=sr)
+    centroid_mean = float(np.mean(centroid))
+
+    # Concatenate everything into one fixed-length vector of shape (15,).
+    return np.concatenate([mfcc_mean, [zcr_mean, centroid_mean]])
 
 
 # --- Dataset Loading ----------------------------------------------------------
@@ -97,8 +114,8 @@ def load_dataset(data_dir):
     Walk through data/kick/, data/snare/, data/hihat/ and extract features
     from every .wav file found. Returns (X, y) as numpy arrays.
 
-    X shape: (n_samples, N_MFCC) — one row per audio clip
-    y shape: (n_samples,)        — integer class label per clip
+    X shape: (n_samples, 15) — one row per audio clip (13 MFCC + ZCR + centroid)
+    y shape: (n_samples,)    — integer class label per clip
     """
     all_features = []
     all_labels   = []
