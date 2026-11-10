@@ -1,85 +1,97 @@
-# Beatbox to MIDI Plugin
+# Kushaya
 
-A DAW plugin that listens to you beatboxing and triggers MIDI drum sounds in real time. This repo contains the Phase 1 Python prototype, which proves the core classification pipeline works before any plugin or MIDI code is written.
+Beatbox into a microphone and Kushaya turns each sound into a MIDI drum note: kick, snare or hi-hat.
 
-## What Phase 1 does
+![The Kushaya plugin window](docs/interface.png)
 
-1. You record short `.wav` samples of yourself making kick, snare, and hi-hat sounds in your DAW
-2. A training script learns to tell them apart using audio features (MFCCs)
-3. A live script listens to your mic and prints the detected sound as you beatbox
+There are two versions in this repo:
 
-No UI, no MIDI output yet — just a working terminal prototype.
+| | What it is | Reaction time |
+|---|---|---|
+| **The plugin** (`plugin/`) | A VST3 for your DAW, plus a standalone app | about 10 ms |
+| **The Python prototype** (`src/`) | The original terminal scripts from Phases 1 and 2 | about 300 ms |
 
-## Setup
+## The plugin
 
-Requires Python 3.10+ and Homebrew on macOS (Apple Silicon).
+### Build and install
+
+Needs macOS on Apple Silicon, the Xcode Command Line Tools, and CMake (`brew install cmake`).
 
 ```bash
-# Install PortAudio (needed by sounddevice for mic access)
-brew install portaudio
+./scripts/build_plugin.sh
+```
 
-# Create and activate the virtual environment
+The first run downloads JUCE and takes 5-10 minutes. It installs the plugin to
+`~/Library/Audio/Plug-Ins/VST3/Kushaya.vst3` and builds a standalone app at
+`build.nosync/plugin/Kushaya_artefacts/Release/Standalone/Kushaya.app`.
+
+### Use it in Studio One
+
+1. Restart Studio One so it finds the new plugin.
+2. Put **Kushaya** (under Effects, VST3) on the audio track your microphone is on, and turn on that track's monitor button.
+3. Add an instrument track with a drum sampler such as Impact XT.
+4. Set the instrument track's input to **Kushaya** and turn on its monitor button.
+5. Beatbox. The pads light up and the sampler plays.
+
+### The controls
+
+- **Pads** flash when their drum is detected. Click a pad to send its note, which is handy for checking the routing. The arrows change which MIDI note it sends (defaults: 36, 38, 42).
+- **Sensitivity** sets how loud a sound must be to count as a hit. The blue line on the input meter shows the trigger level.
+- **Dynamics** sets how much the loudness of your voice changes the note velocity. At 0% every hit is the same.
+- **Retrigger** is the shortest allowed gap between two hits. Raise it if one sound triggers twice.
+- **Voice Thru** passes your voice to the output. Turn it off to hear only the drums.
+
+### Retrain it on new recordings
+
+Put short `.wav` clips, one hit each, into `data/kick/`, `data/snare/` and `data/hihat/`, then:
+
+```bash
+./scripts/retrain.sh
+```
+
+This prints the accuracy on recordings the model has not seen, rewrites `plugin/core/Model.h`, and rebuilds the plugin. Restart your DAW afterwards.
+
+### How it works
+
+```
+microphone -> OnsetCapture -> FeatureExtractor -> RandomForest -> MIDI note
+              (spot a hit)    (describe 12 ms     (kick, snare
+                               of it as 18         or hi-hat?)
+                               numbers)
+```
+
+The same C++ code in `plugin/core/` extracts the features for training and inside the plugin, so the two always agree.
+
+## The Python prototype
+
+```bash
+brew install portaudio
 python3 -m venv venv
 source venv/bin/activate
+pip install sounddevice librosa scikit-learn numpy scipy joblib mido python-rtmidi
 
-# Install dependencies
-pip install sounddevice librosa scikit-learn numpy scipy joblib
+python src/train_classifier.py   # train on data/
+python src/live_classify.py      # print detected sounds
+python src/live_to_midi.py       # send MIDI to the "IAC Driver Bus 1" port
 ```
 
-## Usage
+See `PHASE1_BRIEF.md` and `PHASE2_BRIEF.md` for details.
 
-### 1. Add training samples
+If this folder is inside iCloud Drive, the `venv` folder becomes very slow once iCloud moves its files to the cloud. Delete it and create it again if imports hang.
 
-Record 10–20 short clips (0.5–2 seconds each) of yourself making each sound in Studio One or any DAW. Export as `.wav` and drop them into the correct folders:
-
-```
-data/kick/    ← kick drum sounds
-data/snare/   ← snare sounds
-data/hihat/   ← hi-hat sounds
-```
-
-### 2. Train the classifier
-
-```bash
-source venv/bin/activate
-python src/train_classifier.py
-```
-
-Prints accuracy and a per-class breakdown, then saves the model to `models/classifier.pkl`.
-
-### 3. Classify live
-
-```bash
-python src/live_classify.py
-```
-
-Beatbox into your mic. The terminal prints the detected sound:
+## Project layout
 
 ```
-🥁 Detected: KICK
-🥁 Detected: SNARE
-🥁 Detected: HI-HAT
+data/        training recordings (kick, snare, hihat)
+plugin/
+  core/      onset detection, features and the model (plain C++)
+  src/       the plugin and its interface (JUCE)
+  tools/     command-line test and training helpers
+scripts/     build_plugin.sh, retrain.sh, train_plugin_model.py
+src/         the Python prototype
+build.nosync/  everything generated (not committed, not synced to iCloud)
 ```
 
-Press `Ctrl+C` to stop.
+## Licensing note
 
-## Tuning tips
-
-- **Too many false triggers** — raise `RMS_THRESHOLD` at the top of `live_classify.py`
-- **Real hits not detected** — lower `RMS_THRESHOLD`
-- **Poor accuracy** — add more training samples (aim for 20+ per class)
-
-## Project structure
-
-```
-beatbox-to-midi/
-├── data/
-│   ├── kick/       ← training samples go here
-│   ├── snare/
-│   └── hihat/
-├── models/         ← classifier.pkl saved here after training
-├── src/
-│   ├── train_classifier.py
-│   └── live_classify.py
-└── venv/           ← local Python environment (not committed)
-```
+The plugin is built with [JUCE](https://juce.com), which is free for open-source (AGPLv3) projects and has its own commercial licence terms. Check those before selling the plugin.

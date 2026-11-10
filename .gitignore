@@ -10,3 +10,7 @@ models/*.pkl
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Plugin build output, downloaded JUCE and the training environment.
+# (The ".nosync" ending also stops iCloud Drive from uploading it.)
+build.nosync/
